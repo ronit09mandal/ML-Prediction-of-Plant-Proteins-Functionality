@@ -129,7 +129,7 @@ test_data$Lasso_Prediction <- predict(lasso_model, newx = as.matrix(test_data[, 
 test_data$Loglinear_Prediction <- predict(loglinear_model, newdata = test_data, type = "response")
 
 library(openxlsx)
-write.xlsx(test_data, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_sol1.xlsx", rowNames = TRUE)
+write.xlsx(test_data, file = "dataset link", rowNames = TRUE)
 
 ggplot(predictions_melted, aes(x = predicted, y = model, color = model)) +
   geom_point() +
