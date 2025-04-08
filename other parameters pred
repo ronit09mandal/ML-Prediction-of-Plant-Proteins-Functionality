@@ -1,0 +1,2326 @@
+EAI Pred
+# Load necessary libraries
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(kernlab)
+library(nnet)
+library(neuralnet)
+library(class)
+library(readxl)
+library(splines)
+library(rpart)
+library(gbm)
+library(lightgbm)
+library(xgboost)
+library(glmnet)
+library(lars)
+
+
+# Read in data
+protein_data <- read_xlsx("dataset path.xlsx")
+
+# Split data into training and testing sets
+set.seed(123)
+train_idx <- createDataPartition(protein_data$EAI, p = 0.7, list = FALSE)
+train_data <- protein_data[train_idx, ]
+test_data <- protein_data[-train_idx, ]
+
+# Create regression models
+lm_model <- lm(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data)
+poly_model <- lm(EAI ~ poly(Surface_Hydrophobicity, degree = 3) + poly(Solubility_7NH, degree = 3)+ poly(U, degree = 3), data = train_data)
+rf_model <- randomForest(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data)
+svm_model <- ksvm(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data, type = "eps-svr", kernel = "vanilladot")
+svm_model <- ksvm(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data, type = "eps-svr", kernel = "rbfdot",
+                  C = 0.1, kpar = list(sigma = 0.01))
+gaussian_model <- ksvm(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data, kernel = "rbfdot", type = "eps-svr",
+                       C = 10, kpar = list(sigma = 1))
+nn_model <- neuralnet(EAI ~ Surface_Hydrophobicity + Solubility_7NH+U, data = train_data, hidden = c(7,5))
+spline_model <- lm(EAI ~ ns(Surface_Hydrophobicity, df = 3) + ns(Solubility_7NH, df=5)+ ns(U, df = 3), data = train_data)
+knn_model <- knn(train = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")], 
+                 test = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")], 
+                 cl = train_data$EAI, 
+                 k = 10)
+tree_model <- rpart(EAI ~ Surface_Hydrophobicity + Solubility_7NH + U, data = train_data)
+tree_model <- rpart(EAI ~ Surface_Hydrophobicity + Solubility_7NH + U, data = train_data, method = "anova", 
+                    control = rpart.control(maxdepth = 6, 
+                                            minsplit = 2, 
+                                            minbucket = 1, 
+                                            cp = 0.01))
+gbm_model <- gbm(EAI ~ Surface_Hydrophobicity + Solubility_7NH + U, data = train_data, n.trees = 100, interaction.depth = 3)
+gbm_model <- train(
+  EAI ~ Surface_Hydrophobicity + Solubility_7NH + U,
+  data = train_data,
+  method = "gbm",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = data.frame(n.trees = 50,
+                        interaction.depth = 7,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 5)
+)
+poisson_model <- glm(EAI ~ Surface_Hydrophobicity +Solubility_7NH + U, data = train_data, family = poisson())
+
+lasso_model <- glmnet( x= as.matrix(train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")]), y = train_data$EAI, alpha = 1, lambda = 1)
+loglinear_model <- glm(EAI ~ Surface_Hydrophobicity + Solubility_7NH + U, data = train_data, family = poisson(link = "log"))
+
+# Make predictions using test set
+lm_pred <- predict(lm_model, newdata = test_data)
+poly_pred <- predict(poly_model, newdata = test_data)
+rf_pred <- predict(rf_model, newdata = test_data)
+svm_pred <- predict(svm_model, newdata = test_data)
+gaussian_pred <- predict(gaussian_model, newdata = test_data)
+nn_pred <- predict(nn_model, newdata = test_data)
+sp_pred <- predict(spline_model, newdata = test_data)
+knn_pred <- as.numeric(knn_model)
+tree_pred <- predict(tree_model, newdata = test_data)
+poisson_pred <- predict(poisson_model, newdata = test_data)
+gbm_pred <- predict(gbm_model, newdata = test_data)
+lasso_pred <- predict(lasso_model, newx = as.matrix(test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")]))
+loglinear_pred <- predict(loglinear_model, newdata = test_data, type = "response")
+
+
+# Create a data frame to store the predictions
+predictions <- data.frame(lm = lm_pred, poly_pred, rf = rf_pred, svm = svm_pred, gaussian = gaussian_pred, nn = nn_pred, sp_pred, tree = tree_pred, gbm = gbm_pred, poisson = poisson_pred, lasso = lasso_pred, loglin = loglinear_pred, actual = test_data$EAI)
+
+# Melt the data frame for plotting
+library(reshape)
+predictions_melted <- melt(predictions, id.vars = "actual", variable.name = "model", value.name = "predicted")
+
+
+# Create a scatter plot with actual values on x-axis and predicted values on y-axis
+ggplot(predictions_melted, aes(x = actual, y = predicted, color = model)) + 
+  geom_point() + 
+  labs(x = "Actual Solubility", y = "Predicted Solubility", color = "Model") + 
+  theme_bw()
+
+
+# Predict on test data
+test_data$Linear_Prediction <- predict(lm_model, newdata = test_data)
+test_data$Poly_Prediction <- predict(poly_model, newdata = test_data)
+test_data$RF_Prediction <- predict(rf_model, newdata = test_data)
+test_data$SVM_Prediction <- predict(svm_model, newdata = test_data)
+test_data$Gaussian_Prediction <- predict(gaussian_model, newdata = test_data)
+test_data$nn_Prediction <- predict(nn_model, newdata = test_data)
+test_data$Spline_Prediction <- predict(spline_model, newdata = test_data)
+test_data$KNN_Prediction <- as.numeric(knn_model)
+test_data$Tree_Prediction <- predict(tree_model, newdata = test_data)
+test_data$Poisson_Prediction <- predict(poisson_model, newdata = test_data)
+test_data$Gbm_Prediction <- predict(gbm_model, newdata = test_data)
+test_data$Lasso_Prediction <- predict(lasso_model, newx = as.matrix(test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")]))
+test_data$Loglinear_Prediction <- predict(loglinear_model, newdata = test_data, type = "response")
+
+write.xlsx(test_data, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_eai1.xlsx", rowNames = TRUE)
+
+# Calculate MAE and R2 for each model
+
+library(Metrics)
+mae_linear <- mae(test_data$EAI, test_data$Linear_Prediction)
+mae_poly <- mae(test_data$EAI, test_data$Poly_Prediction)
+mae_rf <- mae(test_data$EAI, test_data$RF_Prediction)
+mae_svm <- mae(test_data$EAI, test_data$SVM_Prediction)
+mae_gaussian <- mae(test_data$EAI, test_data$Gaussian_Prediction)
+mae_nn <- mae(test_data$EAI, test_data$nn_Prediction)
+mae_sp <- mae(test_data$EAI, test_data$Spline_Prediction)
+mae_knn <- mae(test_data$EAI, test_data$KNN_Prediction)
+mae_tree <- mae(test_data$EAI, test_data$Tree_Prediction)
+mae_poisson <- mae(test_data$EAI, test_data$Poisson_Prediction)
+mae_gbm <- mae(test_data$EAI, test_data$Gbm_Prediction)
+mae_lasso <- mae(test_data$EAI, test_data$Lasso_Prediction)
+mae_loglinear <- mae(test_data$EAI, test_data$Loglinear_Prediction)
+
+
+corr <- cor(test_data$EAI, test_data$Linear_Prediction)
+r2_linear <- corr^2
+corr2 <- cor(test_data$EAI, test_data$Poly_Prediction)
+r2_poly <- corr2^2
+corr3 <- cor(test_data$EAI, test_data$RF_Prediction)
+r2_rf <- corr3^2
+corr4 <- cor(test_data$EAI, test_data$SVM_Prediction)
+r2_svm <- corr4^2
+corr5 <- cor(test_data$EAI, test_data$Gaussian_Prediction)
+r2_gaussian <- corr5^2
+corr6 <- cor(test_data$EAI, test_data$nn_Prediction)
+r2_nn <- corr6^2
+corr7 <- cor(test_data$EAI, test_data$Spline_Prediction)
+r2_sp <- corr7^2
+corr8 <- cor(test_data$EAI, test_data$KNN_Prediction)
+r2_knn <- corr8^2
+corr9 <- cor(test_data$EAI, test_data$Tree_Prediction)
+r2_tree <- corr9^2
+corr10 <- cor(test_data$EAI, test_data$Poisson_Prediction)
+r2_poisson <- corr10^2
+corr11 <- cor(test_data$EAI, test_data$Gbm_Prediction)
+r2_gbm <- corr11^2
+corr12 <- cor(test_data$EAI, test_data$Lasso_Prediction)
+r2_lasso <- corr12^2
+corr13 <- cor(test_data$EAI, test_data$Loglinear_Prediction)
+r2_loglinear <- corr13^2
+
+lm_rmse <- rmse(test_data$EAI, test_data$Linear_Prediction)
+poly_rmse <- rmse(test_data$EAI, test_data$Poly_Prediction)
+rf_rmse <- rmse(test_data$EAI, test_data$RF_Prediction)
+svm_rmse <- rmse(test_data$EAI, test_data$SVM_Prediction)
+gaussian_rmse <- rmse(test_data$EAI, test_data$Gaussian_Prediction)
+nn_rmse <- rmse(test_data$EAI, test_data$nn_Prediction)
+sp_rmse <- rmse(test_data$EAI, test_data$Spline_Prediction)
+knn_rmse <- rmse(test_data$EAI, test_data$KNN_Prediction)
+tree_rmse <- rmse(test_data$EAI, test_data$Tree_Prediction)
+poisson_rmse <- rmse(test_data$EAI, test_data$Poisson_Prediction)
+gbm_rmse <- rmse(test_data$EAI, test_data$Gbm_Prediction)
+lasso_rmse <- rmse(test_data$EAI, test_data$Lasso_Prediction)
+loglinear_rmse <- rmse(test_data$EAI, test_data$Loglinear_Prediction)
+
+# Create a data.frame to store the model results
+model_results_eai <- data.frame(Model = c("Linear", "Polynomial", "Random Forest", "SVM", "Gaussian", "NN", "Spline", "KNN", "Decision Tree", "Poisson", "GBM", "Lasso", "Loglinear"),
+                            MAE = c(mae_linear, mae_poly, mae_rf, mae_svm, mae_gaussian, mae_nn, mae_sp, mae_knn, mae_tree, mae_poisson, mae_gbm, mae_lasso, mae_loglinear),
+                            Correlationr = c(corr, corr2, corr3, corr4, corr5, corr6, corr7, corr8, corr9, corr10, corr11, corr12, corr13),
+                            R2 = c(r2_linear, r2_poly, r2_rf, r2_svm, r2_gaussian, r2_nn, r2_sp, r2_knn, r2_tree, r2_poisson, r2_gbm, r2_lasso, r2_loglinear),
+                            RMSE = c(lm_rmse, poly_rmse, rf_rmse, svm_rmse, gaussian_rmse, nn_rmse, sp_rmse, knn_rmse, tree_rmse, poisson_rmse, gbm_rmse, lasso_rmse, loglinear_rmse))
+
+write.xlsx(model_results_eai, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_eai_metrics.xlsx", rowNames = TRUE)
+
+p <- ggplot(test_data, aes(x = EAI)) +
+  geom_point(aes(y = Linear_Prediction, color = "Linear"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Linear_Prediction), method = "lm", se = FALSE, color = "DODGERBLUE", linewidth = 0.15, alpha = 0.75)+
+  geom_point(aes(y = Poly_Prediction, color = "Polynomial"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Poly_Prediction), method = "lm", se = FALSE, alpha = 0.25, color = "DARKORANGE2", linewidth = 0.15) +
+  geom_point(aes(y = RF_Prediction, color = "Random Forest"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = RF_Prediction), method = "lm", se = FALSE, color = "GREEN3", linewidth = 0.15, alpha = 0.5) +
+  geom_point(aes(y = SVM_Prediction, color = "SVR"), size = 1.5, alpha = 0.15)  +
+  geom_point(aes(y = Gaussian_Prediction, color = "Gaussian SVR"), size = 1.5, alpha = 0.75) +
+  geom_smooth(aes(y = Gaussian_Prediction), method = "lm", se = TRUE, alpha = 0.25, color = "red", linewidth = 0.7) +
+  geom_point(aes(y = nn_Prediction, color = "Neural Network"), size = 1.5, alpha = 0.15)  +
+  geom_point(aes(y = Spline_Prediction, color = "Spline"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Spline_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "peachpuff2", linewidth = 0.15)+
+  geom_point(aes(y = KNN_Prediction, color = "k-NN"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Tree_Prediction, color = "Decision Tree"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Tree_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "blue3", linewidth = 0.15)+
+  geom_point(aes(y = Poisson_Prediction, color = "Poisson"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Gbm_Prediction, color = "GBM"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Gbm_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "darkgoldenrod3", linewidth = 0.15)+
+  geom_point(aes(y = Lasso_Prediction, color = "Lasso"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Lasso_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "brown", linewidth = 0.15)+
+  geom_point(aes(y = Loglinear_Prediction, color = "Loglinear"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Loglinear_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "magenta", linewidth = 0.15)+
+  scale_color_manual(values = c("Linear" = "DODGERblue", "Polynomial" = "DARKORANGE2", "Random Forest" = "green3", "SVR" = "PURPLE", "Gaussian SVR" = "red", "Neural Network" = "GREY", "Spline" = "peachpuff2", "k-NN" = "cyan4", "Decision Tree" = "blue3", "Poisson" = "pink1", "GBM" = "darkgoldenrod3", "Lasso" = "brown", "Loglinear" = "magenta")) +
+  ggtitle("EAI Prediction by Regression Models")+
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Observed EAI [m²/g]", y = "Predicted EAI [m²/g]", color = "ML Models") +
+  theme_linedraw()+
+  annotate("text", x = 54, y = 400, hjust = 0, label = "Gaussian SVR Fit")+
+  annotate("text", x = 30, y = 384, hjust = 0, label = "R² = 0.7383; MAE = 31.98; RMSE = 47.02; RMSEcv = 109.1", size = 3)+
+  annotate("segment", x = 30, xend = 50, y = 400, yend = 400, color = "red", size = 1) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14), panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ylim(0,400)
+  
+print(p)
+
++
+  annotate("text", x = 6, y = 100, hjust = 0, label = "Gaussian Fit")+
+  annotate("text", x = 1, y = 96, hjust = 0, label = "R² = 0.8906; MAE = 7.4711; RMSE = 9.584; RMSEcv = 39.60", size = 3)+
+  annotate("segment", x = 1, xend = 5, y = 100, yend = 100, color = "red", size = 1)
+
+ggplot(test_data, aes(x = Surface_Hydrophobicity)) +
+  geom_point(aes(y = Linear_Prediction, color = "Linear"), size = 1, alpha = 0.75) +
+  geom_smooth(aes(y = Linear_Prediction), method = "lm", se = FALSE, color = "DODGERBLUE", linewidth = 0.25)+
+  geom_point(aes(y = Poly_Prediction, color = "Polynomial"), size = 1, alpha = 0.75) +
+  geom_line(aes(y = Poly_Prediction, group = 1), color = "darkorange2", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = RF_Prediction, color = "Random Forest"), size = 1, alpha = 0.75) +
+  geom_line(aes(y = RF_Prediction, group = 1), color = "green", linetype = "solid", size = 0.5) +
+  geom_point(aes(y = SVM_Prediction, color = "SVM"), size = 1, alpha = 0.75) +
+  geom_line(aes(y = SVM_Prediction, group = 1), color = "RED", linetype = "solid", size = 0.5) +
+  geom_point(aes(y = Gaussian_Prediction, color = "Gaussian"), size = 1, alpha = 0.75) +
+  geom_line(aes(y = Gaussian_Prediction, group = 1), color = "PURPLE", linetype = "solid", size = 0.5) +
+  geom_point(aes(y = nn_Prediction, color = "NN"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = nn_Prediction, group = 1), color = "grey", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Spline_Prediction, color = "Spline"), size = 1, alpha = 0.75)+
+  geom_line(aes(y = Spline_Prediction, group = 1), color = "red", linetype = "solid", size = 0.5) +
+  geom_point(aes(y = KNN_Prediction, color = "KNN"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = KNN_Prediction, group = 1), color = "BLUE3", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Tree_Prediction, color = "Decision Tree"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = Tree_Prediction, group = 1), color = "PINK4", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Poisson_Prediction, color = "Poisson"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = Poisson_Prediction, group = 1), color = "brown", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Gbm_Prediction, color = "GBM"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = Gbm_Prediction, group = 1), color = "brown3", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Lasso_Prediction, color = "Lasso"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = Lasso_Prediction, group = 1), color = "pink1", linetype = "solid", size = 0.5)+
+  geom_point(aes(y = Loglinear_Prediction, color = "Loglinear"), size = 1, alpha = 0.5) +
+  geom_line(aes(y = Loglinear_Prediction, group = 1), color = "purple3", linetype = "solid", size = 0.5)+
+  scale_color_manual(values = c("Linear" = "DODGERblue",  "Random Forest" = "green3", "SVM" = "red", "Gaussian" = "purple", "NN" = "GREY", "KNN" = "BLUE3", "Decision Tree" = "pink4", "Poisson" = "brown", "GBM" = "Brown2", "Lasso" = "pink1", "Loglinear" = "purple3")) +
+  ggtitle("EAI Prediction by Regression Models")+
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  labs(x = expression("Actual EAI [m"^"2"*"/g]"), y = expression("Predicted EAI [m"^"2"*"/g]"), color = "ML Models") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14))+  ylim(0,400)
+
+#SHAP
+# Load the required packages
+install.packages("mlr")
+library(shap)
+
+# Compute SHAP values for linear regression (lm_model)
+lm_shap <- shap(lm_model, X = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Compute SHAP values for random forest (rf_model)
+rf_shap <- shap(rf_model, X = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Compute SHAP values for support vector machine (svm_model)
+svm_shap <- shap(svm_model, X = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Compute SHAP values for other models similarly
+
+# Access the SHAP values
+lm_shap$values  # SHAP values for linear regression
+rf_shap$values  # SHAP values for random forest
+svm_shap$values  # SHAP values for support vector machine
+
+# Plot the SHAP values
+plot(lm_shap, type = "bar")  # SHAP summary plot for linear regression
+plot(rf_shap, type = "bar")  # SHAP summary plot for random forest
+plot(svm_shap, type = "bar")  # SHAP summary plot for support vector machine
+
+# Plot individual SHAP values for a specific instance
+plot(lm_shap, instance = 1)  # SHAP values plot for the first instance
+plot(rf_shap, instance = 1)  # SHAP values plot for the first instance
+plot(svm_shap, instance = 1)  # SHAP values plot for the first instance
+
+# Load the required packages
+library(iml)
+library(DALEX)
+
+# Create a model wrapper using DALEX package
+lm_wrapper <- DALEX::explain(lm_model, data = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Create an explainer object for the linear regression model
+lm_explainer <- iml::FeatureImp$new(model = lm_wrapper, data = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")], y = train_data$EAI)
+
+# Compute SHAP values for linear regression
+lm_shap_values <- lm_explainer$predict(test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")], type = "shap")
+
+# Access the SHAP values
+lm_shap_values$shap  # SHAP values for linear regression
+
+# Plot the SHAP values
+plot(lm_shap_values)  # SHAP summary plot for linear regression
+
+# Create a model wrapper using DALEX package
+lm_wrapper <- DALEX::explain(lm_model, data = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Compute SHAP values for linear regression
+lm_shap_values <- shapr::shap(lm_wrapper, X = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Access the SHAP values
+lm_shap_values$shap  # SHAP values for linear regression
+
+# Plot the SHAP values
+shapr::shap.summary_plot(lm_shap_values)  # SHAP summary plot for linear regression
+
+library(mlr)
+
+# Convert the training data to a Task object
+task <- makeRegrTask(data = train_data, target = "EAI")
+
+# Train a linear regression model using mlr package
+lr_model <- train("regr.lm", task)
+
+# Create a SHAP explainer for the linear regression model
+explainer <- shap_explainer(lr_model, data = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Compute SHAP values for test data
+shap_values <- shap_values(explainer, newdata = test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])
+
+# Access the SHAP values
+shap_values$shap  # SHAP values for linear regression
+
+# Plot the SHAP values
+plot(shap_values)  # SHAP plot for linear regression
+
+
+#Hyperparameter tuning
+
+#POlynomial
+library(caret)
+
+# Define the degrees of the polynomial to evaluate
+degree_grid <- c(1, 2, 3, 4)  # Example grid of degrees to try
+
+# Create a data frame to store the results
+results <- data.frame(degree = integer(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform cross-validation to evaluate different degrees
+for (degree in degree_grid) {
+  # Fit the polynomial regression model with the current degree
+  formula <- as.formula(paste("EAI ~ poly(Surface_Hydrophobicity, degree = ", degree, ") + poly(Solubility_7NH, degree = ", degree, ") + poly(U, degree = ", degree, ")", sep = ""))
+  poly_model <- lm(formula, data = train_data)
+  
+  # Make predictions on the test set
+  pred <- predict(poly_model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((test_data$EAI - pred)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(degree = degree, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#RF
+library(caret)
+library(randomForest)
+
+# Define the grid of hyperparameters to search
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6),  # Number of variables randomly sampled as candidates at each split
+  ntree = c(100, 200, 300)  # Number of trees in the forest
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+rf_tuned <- tuneRF(
+  x = train_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")],
+  y = train_data$EAI,
+  mtryStart = 2,  # Start value for mtry
+  mtryEnd = 6,    # End value for mtry
+  stepFactor = 2, # Factor to increase mtry at each iteration
+  ntreeTry = 100, # Number of trees to try for each mtry
+  improve = 0.05  # Minimum improvement in node impurity for splitting
+)
+
+# Print the tuned parameters
+print(rf_tuned)
+
+# Access the hyperparameters of the random forest model
+mtry_value <- rf_model$mtry
+ntree_value <- rf_model$ntree
+
+# Print the hyperparameter values
+cat("mtry =", mtry_value, "\n")
+cat("ntree =", ntree_value, "\n")
+
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  hidden_units = list(c(5), c(10), c(7, 5)),  # Example hyperparameter: hidden units
+  decay = c(0.01, 0.001, 0.0001)  # Example hyperparameter: weight decay
+)
+
+# Function to train and evaluate the model with given hyperparameters
+train_and_evaluate <- function(hidden_units, decay) {
+  # Train the model with current hyperparameter settings
+  model <- neuralnet(
+    EAI ~ Surface_Hydrophobicity + Solubility_7NH + U,
+    data = train_data,
+    hidden = hidden_units
+  )
+  
+  # Make predictions on the test set
+  predictions <- compute(model, test_data[, c("Surface_Hydrophobicity", "Solubility_7NH", "U")])$net.result
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$Solubility_7NH)^2))
+  
+  # Return hyperparameter settings and RMSE
+  list(hidden_units = hidden_units, decay = decay, RMSE = rmse)
+}
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  train_and_evaluate(row$hidden_units, row$decay)
+})
+
+# Combine the results into a data frame
+results <- do.call(rbind, results)
+
+# Print the results
+print(results)
+
+#svm
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  cost = c(0.1, 1, 10),  # Example hyperparameter: cost
+  gamma = c(0.01, 0.1, 1)  # Example hyperparameter: gamma
+)
+
+# Create an empty data frame to store the results
+results <- data.frame(cost = numeric(), gamma = numeric(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform grid search with cross-validation
+for (i in 1:nrow(hyperparameters)) {
+  cost <- hyperparameters$cost[i]
+  gamma <- hyperparameters$gamma[i]
+  
+  # Train the model with current hyperparameter settings
+  model <- ksvm(
+    EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "vanilladot",
+    C = cost,
+    kpar = list()
+  )
+  
+  # Make predictions on the test set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results[i, ] <- c(cost, gamma, rmse)
+}
+
+# Print the results
+print(results)
+
+#GBM
+# Define the grid of hyperparameters to search
+gbm_grid <- expand.grid(
+  n.trees = c(50, 100, 200),  # Number of trees in the boosting process
+  interaction.depth = c(3, 5, 7),  # Depth of variable interactions
+  shrinkage = c(0.1, 0.01),  # Learning rate or shrinkage parameter
+  n.minobsinnode = c(5, 10)  # Minimum number of observations in a terminal node
+)
+
+
+# Perform cross-validation to find the optimal hyperparameters
+gbm_tuned <- train(
+  EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U,
+  data = train_data,
+  method = "gbm",
+  tuneGrid = gbm_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Access the best hyperparameters and model performance
+best_gbm_params <- gbm_tuned$bestTune
+best_gbm_model <- gbm_tuned$finalModel
+
+
+#Gaussian
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  C = c(0.1, 1, 10),  # Values for the Cost parameter
+  sigma = c(0.01, 0.1, 1)  # Values for the Kernel Width (sigma)
+)
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  C <- row$C
+  sigma <- row$sigma
+  
+  # Train the model with current hyperparameter settings
+  model <- ksvm(
+    EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "rbfdot",
+    cost = C,
+    gamma = 1 / (2 * sigma^2)
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+  
+  # Return the hyperparameter settings and RMSE
+  c(C = C, sigma = sigma, RMSE = rmse)
+})
+
+# Convert the results to a data frame
+results <- as.data.frame(t(results))
+
+# Print the results
+print(results)
+
+#spline model
+# Load the required libraries
+# Define the tuning parameter grid
+spline_grid <- expand.grid(
+  df1 = c(2, 3, 4),  # Degree of freedom for Surface_Hydrophobicity
+  df2 = c(2, 3, 4),  # Degree of freedom for Zeta_Potential
+  intercept = c(TRUE, FALSE)  # Include or exclude intercept
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+spline_tuned <- train(
+  EAI ~ ns(Surface_Hydrophobicity, df = df1) + ns(Solubility_7NH, df = df2) + U,
+  data = train_data,
+  method = "lm",  # Use lm method for spline model
+  tuneGrid = spline_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Define the grid of hyperparameters to search
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5) ,  # degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5)   # degrees of freedom for U
+)
+
+# Initialize variables to store the best hyperparameters and RMSE
+best_rmse <- Inf
+best_df1 <- NULL
+best_df2 <- NULL
+best_df3 <- NULL
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(EAI ~ ns(Surface_Hydrophobicity, df = df1) + ns(Solubility_7NH, df = df2) + ns(U, df = df3), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+  
+  # Check if current combination of hyperparameters is better than the previous best
+  if (rmse < best_rmse) {
+    best_rmse <- rmse
+    best_df1 <- df1
+    best_df2 <- df2
+    best_df3 <- df3
+  }
+}
+
+# Fit the final spline model using the best hyperparameters
+final_model <- lm(EAI ~ ns(Surface_Hydrophobicity, df = best_df1) + ns(Solubility_7NH, df = best_df2) + ns(U, df = df3), data = train_data)
+
+# Evaluate the final model on the test set
+test_predictions <- predict(final_model, newdata = test_data)
+test_rmse <- sqrt(mean((test_predictions - test_data$EAI)^2))
+
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5),# degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(df1 = numeric(), df2 = numeric(), df3 = numeric(), RMSE = numeric())
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(EAI ~ ns(Surface_Hydrophobicity, df = df1) + ns(Solubility_7NH, df = df2) + ns(U, df = df3), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results <- rbind(results, data.frame(df1 = df1, df2 = df2, df3 = df3, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#Decision tree
+library(rpart)
+
+# Define the hyperparameters to search
+max_depths <- c(2, 4, 6)
+min_samples_splits <- c(2, 5, 10)
+min_samples_leafs <- c(1, 2, 4)
+cps <- c(0.001, 0.01, 0.1)
+
+# Initialize variables to store results
+best_rmse <- Inf
+best_tree <- NULL
+
+# Perform grid search
+for (max_depth in max_depths) {
+  for (min_samples_split in min_samples_splits) {
+    for (min_samples_leaf in min_samples_leafs) {
+      for (cp in cps) {
+        # Train the decision tree with current hyperparameters
+        model <- rpart(
+          EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U,
+          data = train_data,
+          method = "anova",
+          control = rpart.control(maxdepth = max_depth, minsplit = min_samples_split, minbucket = min_samples_leaf, cp = cp)
+        )
+        
+        # Make predictions on the validation set
+        predictions <- predict(model, newdata = test_data)
+        
+        # Calculate RMSE
+        rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+        
+        # Check if current model has lower RMSE
+        if (rmse < best_rmse) {
+          best_rmse <- rmse
+          best_tree <- model
+        }
+      }
+    }
+  }
+}
+
+# Print the best model
+print(best_tree)
+
+hyperparameters <- expand.grid(
+  max_depth = c(2, 4, 6),
+  min_samples_split = c(2, 5, 10),
+  min_samples_leaf = c(1, 2, 4),
+  cp = c(0.001, 0.01, 0.1)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(hyperparameters = character(),
+                      rmse = numeric(),
+                      stringsAsFactors = FALSE)
+
+# Perform grid search
+for (i in 1:nrow(hyperparameters)) {
+  # Get the current set of hyperparameters
+  params <- hyperparameters[i, ]
+  
+  # Train the decision tree model using the current hyperparameters
+  model <- rpart(
+    EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U,
+    data = train_data,
+    method = "anova",
+    control = rpart.control(
+      maxdepth = params$max_depth,
+      minsplit = params$min_samples_split,
+      minbucket = params$min_samples_leaf,
+      cp = params$cp
+    )
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EAI)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(hyperparameters = toString(params),
+                                       rmse = rmse))
+}
+
+# Print the results
+print(results)
+
+#K-NN model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of k
+grid <- expand.grid(k = 1:10)
+
+# Train the KNN model using cross-validation and grid search
+knn_model <- train(EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U, data = train_data, method = "knn",
+                   trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(knn_model$bestTune)
+print(knn_model$results)
+
+
+#Poisson model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of the regularization parameter
+grid <- expand.grid(alpha = seq(0, 1, by = 0.1), lambda = seq(0, 1, by = 0.1))
+
+# Train the Poisson regression model using cross-validation and grid search
+poisson_model <- train(EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U, data = train_data, method = "glmnet",
+                       family = "poisson", trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(poisson_model$bestTune)
+print(poisson_model$results)
+
+#Loglinear model
+# Load required libraries
+library(glmnet)
+library(caret)
+
+# Define the tuning grid
+grid <- expand.grid(lambda = seq(0, 1, by = 0.1), alpha =  seq(0, 1, by = 0.1))  # Regularization parameter values
+
+# Define cross-validation control
+ctrl <- trainControl(method = "cv", number = 5, verboseIter = TRUE)
+
+# Train the log-linear model using cross-validation and grid search
+loglinear_model <- train(Solubility_7NH ~ Surface_Hydrophobicity + Zeta_Potential + U,  # Replace with your formula and predictors
+                         data = train_data,
+                         method = "glmnet",
+                         family = "poisson",
+                         trControl = ctrl,
+                         tuneGrid = grid)
+
+# Print the best hyperparameter and corresponding RMSE
+best_lambda <- loglinear_model$bestTune$lambda
+best_rmse <- min(loglinear_model$results$RMSE)
+
+cat("Best Hyperparameter:\n")
+cat("Lambda:", best_lambda, "\n")
+cat("Best RMSE:", best_rmse, "\n")
+
+# Fit the final log-linear model with the best hyperparameter
+final_model <- glmnet(Solubility_7NH ~ .,  # Replace with your formula and predictors
+                      data = train_data,
+                      family = "poisson",
+                      alpha = 1,  # L1 regularization (Lasso)
+                      lambda = best_lambda)
+
+#Cross-validation
+
+model <- train(Solubility_7NH ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, method = "lm")
+ctrl <- trainControl(method = "cv", number = 5)
+cv_results <- train(Solubility_7NH ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, method = "glm", trControl = ctrl)
+summary(cv_results)
+print(model)
+
+#correct cross validation starts here
+train_control <- trainControl(method = "cv", number = 5)
+
+# training the model by assigning sales column
+# as target variable and rest other column
+# as independent variable
+model1 <- train(Solubility_7NH ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data,
+                method = "knn",
+                trControl = train_control)
+
+# printing model performance metrics
+# along with other details
+print(model1)
+
+
+# Set the number of folds for cross-validation
+k <- 5
+
+# Create an empty vector to store the cross-validated predictions
+cv_predictions <- vector("list", length = k)
+
+# Perform cross-validation
+for (i in 1:k) {
+  # Split the data into training and validation sets for each fold
+  train_indices <- which((1:nrow(train_data)) %% k != i %% k)
+  validation_indices <- which((1:nrow(train_data)) %% k == i %% k)
+  train_fold <- train_data[train_indices, ]
+  validation_fold <- train_data[validation_indices, ]
+  
+  # Train the Gaussian kernel SVR model on the training fold
+  model_gaussiancv <- ksvm(EAI ~ Surface_Hydrophobicity + Solubility_7NH+ U, data = train_fold, type = "eps-svr", kernel = "rbfdot")
+  
+  # Make predictions on the validation fold
+  predictions <- predict(model_gaussiancv, newdata = validation_fold)
+  
+  # Store the predictions in the cv_predictions vector
+  cv_predictions[[i]] <- predictions
+}
+
+# Combine the cross-validated predictions into a single vector
+cv_predictions <- unlist(cv_predictions)
+
+# Calculate the RMSECV
+rmsecv <- sqrt(mean((train_data$EAI - cv_predictions)^2)) 
+
+
+EC Pred
+# Load necessary libraries
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(kernlab)
+library(nnet)
+library(neuralnet)
+library(class)
+library(readxl)
+library(splines)
+library(rpart)
+library(gbm)
+library(lightgbm)
+library(xgboost)
+library(glmnet)
+library(lars)
+
+
+# Read in data
+protein_data <- read_xlsx("dataset path.xlsx")
+
+# Split data into training and testing sets
+set.seed(123)
+train_idx <- createDataPartition(protein_data$EC, p = 0.7, list = FALSE)
+train_data <- protein_data[train_idx, ]
+test_data <- protein_data[-train_idx, ]
+
+# Create regression models
+lm_model <- lm(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data)
+poly_model <- lm(EC ~ poly(Surface_Hydrophobicity, degree = 4) + poly(Zeta_Potential, degree = 4)+ poly(U, degree = 4), data = train_data)
+rf_model <- randomForest(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data)
+svm_model <- ksvm(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, type = "eps-svr", kernel = "vanilladot")
+svm_model <- ksvm(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, type = "eps-svr", kernel = "rbfdot",
+                  C = 0.1, kpar = list(sigma = 0.01))
+gaussian_model <- ksvm(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, kernel = "rbfdot", type = "eps-svr")
+gaussian_model <- ksvm(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, kernel = "rbfdot", type = "eps-svr",
+                       C = 10, kpar = list(sigma = 1))
+nn_model <- neuralnet(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, hidden = c(7,5))
+spline_model <- lm(EC ~ ns(Surface_Hydrophobicity, df = 5) + ns(Zeta_Potential, df=4)+ ns(U, df = 5), data = train_data)
+knn_model <- knn(train = train_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")], 
+                 test = test_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")], 
+                 cl = train_data$EC, 
+                 k = 9)
+tree_model <- rpart(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data)
+tree_model <- rpart(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data, method = "anova", 
+                    control = rpart.control(maxdepth = 4, 
+                                            minsplit = 2, 
+                                            minbucket = 1, 
+                                            cp = 0.01))
+gbm_model <- gbm(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data, n.trees = 100, interaction.depth = 3)
+gbm_model <- train(
+  EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+  data = train_data,
+  method = "gbm",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = data.frame(n.trees = 50,
+                        interaction.depth = 7,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 5)
+)
+poisson_model <- glm(EC ~ Surface_Hydrophobicity +Zeta_Potential + U, data = train_data, family = poisson())
+lasso_model <- glmnet( x= as.matrix(train_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")]), y = train_data$EC, alpha = 1, lambda = 1)
+loglinear_model <- glm(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data, family = poisson(link = "log"))
+
+# Make predictions using test set
+lm_pred <- predict(lm_model, newdata = test_data)
+poly_pred <- predict(poly_model, newdata = test_data)
+rf_pred <- predict(rf_model, newdata = test_data)
+svm_pred <- predict(svm_model, newdata = test_data)
+gaussian_pred <- predict(gaussian_model, newdata = test_data)
+nn_pred <- predict(nn_model, newdata = test_data)
+sp_pred <- predict(spline_model, newdata = test_data)
+knn_pred <- as.numeric(knn_model)
+tree_pred <- predict(tree_model, newdata = test_data)
+poisson_pred <- predict(poisson_model, newdata = test_data)
+gbm_pred <- predict(gbm_model, newdata = test_data)
+lasso_pred <- predict(lasso_model, newx = as.matrix(test_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")]))
+loglinear_pred <- predict(loglinear_model, newdata = test_data, type = "response")
+
+
+# Create a data frame to store the predictions
+predictions <- data.frame(lm = lm_pred, poly_pred, rf = rf_pred, svm = svm_pred, gaussian = gaussian_pred, nn = nn_pred, sp_pred, tree = tree_pred, gbm = gbm_pred, poisson = poisson_pred, lasso = lasso_pred, loglin = loglinear_pred, actual = test_data$EC)
+
+# Melt the data frame for plotting
+library(reshape2)
+predictions_melted <- melt(predictions, id.vars = "actual", variable.name = "model", value.name = "predicted")
+
+
+# Create a scatter plot with actual values on x-axis and predicted values on y-axis
+ggplot(predictions_melted, aes(x = actual, y = predicted, color = model)) + 
+  geom_point() + 
+  labs(x = "Actual Solubility", y = "Predicted Solubility", color = "Model") + 
+  theme_bw()
+
+
+# Predict on test data
+test_data$Linear_Prediction <- predict(lm_model, newdata = test_data)
+test_data$Poly_Prediction <- predict(poly_model, newdata = test_data)
+test_data$RF_Prediction <- predict(rf_model, newdata = test_data)
+test_data$SVM_Prediction <- predict(svm_model, newdata = test_data)
+test_data$Gaussian_Prediction <- predict(gaussian_model, newdata = test_data)
+test_data$nn_Prediction <- predict(nn_model, newdata = test_data)
+test_data$Spline_Prediction <- predict(spline_model, newdata = test_data)
+test_data$KNN_Prediction <- as.numeric(knn_model)
+test_data$Tree_Prediction <- predict(tree_model, newdata = test_data)
+test_data$Poisson_Prediction <- predict(poisson_model, newdata = test_data)
+test_data$Gbm_Prediction <- predict(gbm_model, newdata = test_data)
+test_data$Lasso_Prediction <- predict(lasso_model, newx = as.matrix(test_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")]))
+test_data$Loglinear_Prediction <- predict(loglinear_model, newdata = test_data, type = "response")
+
+write.xlsx(test_data, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_ec1.xlsx", rowNames = TRUE)
+
+# Calculate MAE and R2 for each model
+
+library(Metrics)
+mae_linear <- mae(test_data$EC, test_data$Linear_Prediction)
+mae_poly <- mae(test_data$EC, test_data$Poly_Prediction)
+mae_rf <- mae(test_data$EC, test_data$RF_Prediction)
+mae_svm <- mae(test_data$EC, test_data$SVM_Prediction)
+mae_gaussian <- mae(test_data$EC, test_data$Gaussian_Prediction)
+mae_nn <- mae(test_data$EC, test_data$nn_Prediction)
+mae_sp <- mae(test_data$EC, test_data$Spline_Prediction)
+mae_knn <- mae(test_data$EC, test_data$KNN_Prediction)
+mae_tree <- mae(test_data$EC, test_data$Tree_Prediction)
+mae_poisson <- mae(test_data$EC, test_data$Poisson_Prediction)
+mae_gbm <- mae(test_data$EC, test_data$Gbm_Prediction)
+mae_lasso <- mae(test_data$EC, test_data$Lasso_Prediction)
+mae_loglinear <- mae(test_data$EC, test_data$Loglinear_Prediction)
+
+
+corr <- cor(test_data$EC, test_data$Linear_Prediction)
+r2_linear <- corr^2
+corr2 <- cor(test_data$EC, test_data$Poly_Prediction)
+r2_poly <- corr2^2
+corr3 <- cor(test_data$EC, test_data$RF_Prediction)
+r2_rf <- corr3^2
+corr4 <- cor(test_data$EC, test_data$SVM_Prediction)
+r2_svm <- corr4^2
+corr5 <- cor(test_data$EC, test_data$Gaussian_Prediction)
+r2_gaussian <- corr5^2
+corr6 <- cor(test_data$EC, test_data$nn_Prediction)
+r2_nn <- corr6^2
+corr7 <- cor(test_data$EC, test_data$Spline_Prediction)
+r2_sp <- corr7^2
+corr8 <- cor(test_data$EC, test_data$KNN_Prediction)
+r2_knn <- corr8^2
+corr9 <- cor(test_data$EC, test_data$Tree_Prediction)
+r2_tree <- corr9^2
+corr10 <- cor(test_data$EC, test_data$Poisson_Prediction)
+r2_poisson <- corr10^2
+corr11 <- cor(test_data$EC, test_data$Gbm_Prediction)
+r2_gbm <- corr11^2
+corr12 <- cor(test_data$EC, test_data$Lasso_Prediction)
+r2_lasso <- corr12^2
+corr13 <- cor(test_data$EC, test_data$Loglinear_Prediction)
+r2_loglinear <- corr13^2
+
+lm_rmse <- rmse(test_data$EC, test_data$Linear_Prediction)
+poly_rmse <- rmse(test_data$EC, test_data$Poly_Prediction)
+rf_rmse <- rmse(test_data$EC, test_data$RF_Prediction)
+svm_rmse <- rmse(test_data$EC, test_data$SVM_Prediction)
+gaussian_rmse <- rmse(test_data$EC, test_data$Gaussian_Prediction)
+nn_rmse <- rmse(test_data$EC, test_data$nn_Prediction)
+sp_rmse <- rmse(test_data$EC, test_data$Spline_Prediction)
+knn_rmse <- rmse(test_data$EC, test_data$KNN_Prediction)
+tree_rmse <- rmse(test_data$EC, test_data$Tree_Prediction)
+poisson_rmse <- rmse(test_data$EC, test_data$Poisson_Prediction)
+gbm_rmse <- rmse(test_data$EC, test_data$Gbm_Prediction)
+lasso_rmse <- rmse(test_data$EC, test_data$Lasso_Prediction)
+loglinear_rmse <- rmse(test_data$EC, test_data$Loglinear_Prediction)
+
+# Create a data.frame to store the model results
+model_results_ec <- data.frame(Model = c("Linear", "Polynomial", "Random Forest", "SVM", "Gaussian", "NN", "Spline", "KNN", "Decision Tree", "Poisson", "GBM", "Lasso", "Loglinear"),
+                             MAE = c(mae_linear, mae_poly, mae_rf, mae_svm, mae_gaussian, mae_nn, mae_sp, mae_knn, mae_tree, mae_poisson, mae_gbm, mae_lasso, mae_loglinear),
+                             Correlationr = c(corr, corr2, corr3, corr4, corr5, corr6, corr7, corr8, corr9, corr10, corr11, corr12, corr13),
+                             R2 = c(r2_linear, r2_poly, r2_rf, r2_svm, r2_gaussian, r2_nn, r2_sp, r2_knn, r2_tree, r2_poisson, r2_gbm, r2_lasso, r2_loglinear),
+                             RMSE = c(lm_rmse, poly_rmse, rf_rmse, svm_rmse, gaussian_rmse, nn_rmse, sp_rmse, knn_rmse, tree_rmse, poisson_rmse, gbm_rmse, lasso_rmse, loglinear_rmse))
+
+write.xlsx(model_results_ec, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_ec_metrics.xlsx", rowNames = TRUE)
+
+p <- ggplot(test_data, aes(x = EC)) +
+  geom_point(aes(y = Linear_Prediction, color = "Linear"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Poly_Prediction, color = "Polynomial"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Poly_Prediction), method = "lm", se = FALSE, alpha = 0.25, color = "DARKORANGE2", linewidth = 0.15) +
+  geom_point(aes(y = RF_Prediction, color = "Random Forest"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = RF_Prediction), method = "lm", se = FALSE, color = "GREEN3", linewidth = 0.15, alpha = 0.5) +
+  geom_point(aes(y = SVM_Prediction, color = "SVR"), size = 1.5, alpha = 0.15)  +
+  geom_point(aes(y = Gaussian_Prediction, color = "Gaussian SVR"), size = 1.5, alpha = 0.75) +
+  geom_smooth(aes(y = Gaussian_Prediction), method = "lm", se = TRUE, alpha = 0.25, color = "red", linewidth = 0.7) +
+  geom_point(aes(y = nn_Prediction, color = "Neural Network"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Spline_Prediction, color = "Spline"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Spline_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "peachpuff2", linewidth = 0.15)+
+  geom_point(aes(y = KNN_Prediction, color = "k-NN"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Tree_Prediction, color = "Decision Tree"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Tree_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "blue3", linewidth = 0.15)+
+  geom_point(aes(y = Poisson_Prediction, color = "Poisson"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Gbm_Prediction, color = "GBM"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Gbm_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "darkgoldenrod3", linewidth = 0.15)+
+  geom_point(aes(y = Lasso_Prediction, color = "Lasso"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Loglinear_Prediction, color = "Loglinear"), size = 1.5, alpha = 0.15) +
+  scale_color_manual(values = c("Linear" = "DODGERblue", "Polynomial" = "DARKORANGE2", "Random Forest" = "green3", "SVR" = "PURPLE", "Gaussian SVR" = "red", "Neural Network" = "GREY", "Spline" = "peachpuff2", "k-NN" = "cyan4", "Decision Tree" = "blue3", "Poisson" = "pink1", "GBM" = "darkgoldenrod3", "Lasso" = "brown", "Loglinear" = "magenta")) +
+  ggtitle("EC Prediction by Regression Models")+
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Observed EC [g/g]", y = "Predicted EC [g/g]", color = "ML Models") +
+  theme_linedraw() +
+  annotate("text", x = 120, y = 2000, hjust = 0, label = "Gaussian SVR Fit")+
+  annotate("text", x = 0, y = 1920, hjust = 0, label = "R² = 0.7978; MAE = 154.5; RMSE = 229.5; RMSEcv = 478.2", size = 3)+
+  annotate("segment", x = 0, xend = 105, y = 2000, yend = 2000, color = "red", size = 1)+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14), panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ylim(0,2000)+xlim(0,2000)
+
+print(p)
+
+ec1 <- "my_graph.png"
+ggsave(ec1, plot = p, device = "png", dpi = 1200)
+
+#Hyperparameter tuning
+
+#POlynomial
+library(caret)
+
+# Define the degrees of the polynomial to evaluate
+degree_grid <- c(1, 2, 3, 4)  # Example grid of degrees to try
+
+# Create a data frame to store the results
+results <- data.frame(degree = integer(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform cross-validation to evaluate different degrees
+for (degree in degree_grid) {
+  # Fit the polynomial regression model with the current degree
+  formula <- as.formula(paste("EC ~ poly(Surface_Hydrophobicity, degree = ", degree, ") + poly(Zeta_Potential, degree = ", degree, ") + poly(U, degree = ", degree, ")", sep = ""))
+  poly_model <- lm(formula, data = train_data)
+  
+  # Make predictions on the test set
+  pred <- predict(poly_model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((test_data$EC - pred)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(degree = degree, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#RF
+library(caret)
+library(randomForest)
+
+# Define the grid of hyperparameters to search
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6),  # Number of variables randomly sampled as candidates at each split
+  ntree = c(100, 200, 300)  # Number of trees in the forest
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+rf_tuned <- tuneRF(
+  x = train_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")],
+  y = train_data$EC,
+  mtryStart = 2,  # Start value for mtry
+  mtryEnd = 6,    # End value for mtry
+  stepFactor = 2, # Factor to increase mtry at each iteration
+  ntreeTry = 100, # Number of trees to try for each mtry
+  improve = 0.05  # Minimum improvement in node impurity for splitting
+)
+
+# Print the tuned parameters
+print(rf_tuned)
+
+# Access the hyperparameters of the random forest model
+mtry_value <- rf_model$mtry
+ntree_value <- rf_model$ntree
+
+# Print the hyperparameter values
+cat("mtry =", mtry_value, "\n")
+cat("ntree =", ntree_value, "\n")
+
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  hidden_units = list(c(5), c(10), c(7, 5)),  # Example hyperparameter: hidden units
+  decay = c(0.01, 0.001, 0.0001)  # Example hyperparameter: weight decay
+)
+
+# Function to train and evaluate the model with given hyperparameters
+train_and_evaluate <- function(hidden_units, decay) {
+  # Train the model with current hyperparameter settings
+  model <- neuralnet(
+    EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+    data = train_data,
+    hidden = hidden_units
+  )
+  
+  # Make predictions on the test set
+  predictions <- compute(model, test_data[, c("Surface_Hydrophobicity", "Zeta_Potential", "U")])$net.result
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Return hyperparameter settings and RMSE
+  list(hidden_units = hidden_units, decay = decay, RMSE = rmse)
+}
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  train_and_evaluate(row$hidden_units, row$decay)
+})
+
+# Combine the results into a data frame
+results <- do.call(rbind, results)
+
+# Print the results
+print(results)
+
+#svm
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  cost = c(0.1, 1, 10),  # Example hyperparameter: cost
+  gamma = c(0.01, 0.1, 1)  # Example hyperparameter: gamma
+)
+
+# Create an empty data frame to store the results
+results <- data.frame(cost = numeric(), gamma = numeric(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform grid search with cross-validation
+for (i in 1:nrow(hyperparameters)) {
+  cost <- hyperparameters$cost[i]
+  gamma <- hyperparameters$gamma[i]
+  
+  # Train the model with current hyperparameter settings
+model <- ksvm(
+    EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "vanilladot",
+    C = cost,
+    kpar = list()
+  )
+  
+  # Make predictions on the test set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results[i, ] <- c(cost, gamma, rmse)
+}
+
+# Print the results
+print(results)
+
+#GBM
+# Define the grid of hyperparameters to search
+gbm_grid <- expand.grid(
+  n.trees = c(50, 100, 200),  # Number of trees in the boosting process
+  interaction.depth = c(3, 5, 7),  # Depth of variable interactions
+  shrinkage = c(0.1, 0.01),  # Learning rate or shrinkage parameter
+  n.minobsinnode = c(5, 10)  # Minimum number of observations in a terminal node
+)
+
+
+# Perform cross-validation to find the optimal hyperparameters
+gbm_tuned <- train(
+  EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+  data = train_data,
+  method = "gbm",
+  tuneGrid = gbm_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Access the best hyperparameters and model performance
+best_gbm_params <- gbm_tuned$bestTune
+best_gbm_model <- gbm_tuned$finalModel
+
+
+#Gaussian
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  C = c(0.1, 1, 10),  # Values for the Cost parameter
+  sigma = c(0.01, 0.1, 1)  # Values for the Kernel Width (sigma)
+)
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  C <- row$C
+  sigma <- row$sigma
+  
+  # Train the model with current hyperparameter settings
+  model <- ksvm(
+    EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "rbfdot",
+    cost = C,
+    gamma = 1 / (2 * sigma^2)
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Return the hyperparameter settings and RMSE
+  c(C = C, sigma = sigma, RMSE = rmse)
+})
+
+# Convert the results to a data frame
+results <- as.data.frame(t(results))
+
+# Print the results
+print(results)
+
+#spline model
+# Load the required libraries
+# Define the tuning parameter grid
+spline_grid <- expand.grid(
+  df1 = c(2, 3, 4),  # Degree of freedom for Surface_Hydrophobicity
+  df2 = c(2, 3, 4),  # Degree of freedom for Zeta_Potential
+  intercept = c(TRUE, FALSE)  # Include or exclude intercept
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+spline_tuned <- train(
+  EC ~ ns(Surface_Hydrophobicity, df = df1) + ns(Zeta_Potential, df = df2) + U,
+  data = train_data,
+  method = "lm",  # Use lm method for spline model
+  tuneGrid = spline_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Define the grid of hyperparameters to search
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5) ,  # degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5)   # degrees of freedom for U
+)
+
+# Initialize variables to store the best hyperparameters and RMSE
+best_rmse <- Inf
+best_df1 <- NULL
+best_df2 <- NULL
+best_df3 <- NULL
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(EC ~ ns(Surface_Hydrophobicity, df = df1) + ns(Zeta_Potential, df = df2) + ns(U, df = df3), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Check if current combination of hyperparameters is better than the previous best
+  if (rmse < best_rmse) {
+    best_rmse <- rmse
+    best_df1 <- df1
+    best_df2 <- df2
+    best_df3 <- df3
+  }
+}
+
+# Fit the final spline model using the best hyperparameters
+final_model <- lm(EC ~ ns(Surface_Hydrophobicity, df = best_df1) + ns(Zeta_Potential, df = best_df2) + ns(U, df = df3), data = train_data)
+
+# Evaluate the final model on the test set
+test_predictions <- predict(final_model, newdata = test_data)
+test_rmse <- sqrt(mean((test_predictions - test_data$EC)^2))
+
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5),# degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(df1 = numeric(), df2 = numeric(), df3 = numeric(), RMSE = numeric())
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(EC ~ ns(Surface_Hydrophobicity, df = df1) + ns(Zeta_Potential, df = df2) + ns(U, df = df3), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results <- rbind(results, data.frame(df1 = df1, df2 = df2, df3 = df3, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#Decision tree
+library(rpart)
+
+# Define the hyperparameters to search
+max_depths <- c(2, 4, 6)
+min_samples_splits <- c(2, 5, 10)
+min_samples_leafs <- c(1, 2, 4)
+cps <- c(0.001, 0.01, 0.1)
+
+# Initialize variables to store results
+best_rmse <- Inf
+best_tree <- NULL
+
+# Perform grid search
+for (max_depth in max_depths) {
+  for (min_samples_split in min_samples_splits) {
+    for (min_samples_leaf in min_samples_leafs) {
+      for (cp in cps) {
+        # Train the decision tree with current hyperparameters
+        model <- rpart(
+          EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+          data = train_data,
+          method = "anova",
+          control = rpart.control(maxdepth = max_depth, minsplit = min_samples_split, minbucket = min_samples_leaf, cp = cp)
+        )
+        
+        # Make predictions on the validation set
+        predictions <- predict(model, newdata = test_data)
+        
+        # Calculate RMSE
+        rmse <- sqrt(mean((predictions - test_data$EC)^2))
+        
+        # Check if current model has lower RMSE
+        if (rmse < best_rmse) {
+          best_rmse <- rmse
+          best_tree <- model
+        }
+      }
+    }
+  }
+}
+
+# Print the best model
+print(best_tree)
+
+hyperparameters <- expand.grid(
+  max_depth = c(2, 4, 6),
+  min_samples_split = c(2, 5, 10),
+  min_samples_leaf = c(1, 2, 4),
+  cp = c(0.001, 0.01, 0.1)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(hyperparameters = character(),
+                      rmse = numeric(),
+                      stringsAsFactors = FALSE)
+
+# Perform grid search
+for (i in 1:nrow(hyperparameters)) {
+  # Get the current set of hyperparameters
+  params <- hyperparameters[i, ]
+  
+  # Train the decision tree model using the current hyperparameters
+  model <- rpart(
+    EC ~ Surface_Hydrophobicity + Zeta_Potential + U,
+    data = train_data,
+    method = "anova",
+    control = rpart.control(
+      maxdepth = params$max_depth,
+      minsplit = params$min_samples_split,
+      minbucket = params$min_samples_leaf,
+      cp = params$cp
+    )
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$EC)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(hyperparameters = toString(params),
+                                       rmse = rmse))
+}
+
+# Print the results
+print(results)
+
+#K-NN model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of k
+grid <- expand.grid(k = 1:10)
+
+# Train the KNN model using cross-validation and grid search
+knn_model <- train(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data, method = "knn",
+                   trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(knn_model$bestTune)
+print(knn_model$results)
+
+
+#Poisson model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of the regularization parameter
+grid <- expand.grid(alpha = seq(0, 1, by = 0.1), lambda = seq(0, 1, by = 0.1))
+
+# Train the Poisson regression model using cross-validation and grid search
+poisson_model <- train(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_data, method = "glmnet",
+                       family = "poisson", trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(poisson_model$bestTune)
+print(poisson_model$results)
+
+#Loglinear model
+# Load required libraries
+library(glmnet)
+library(caret)
+
+# Define the tuning grid
+grid <- expand.grid(lambda = seq(0, 1, by = 0.1), alpha =  seq(0, 1, by = 0.1))  # Regularization parameter values
+
+# Define cross-validation control
+ctrl <- trainControl(method = "cv", number = 5, verboseIter = TRUE)
+
+# Train the log-linear model using cross-validation and grid search
+loglinear_model <- train(Solubility_7NH ~ Surface_Hydrophobicity + Zeta_Potential + U,  # Replace with your formula and predictors
+                         data = train_data,
+                         method = "glmnet",
+                         family = "poisson",
+                         trControl = ctrl,
+                         tuneGrid = grid)
+
+# Print the best hyperparameter and corresponding RMSE
+best_lambda <- loglinear_model$bestTune$lambda
+best_rmse <- min(loglinear_model$results$RMSE)
+
+cat("Best Hyperparameter:\n")
+cat("Lambda:", best_lambda, "\n")
+cat("Best RMSE:", best_rmse, "\n")
+
+# Fit the final log-linear model with the best hyperparameter
+final_model <- glmnet(Solubility_7NH ~ .,  # Replace with your formula and predictors
+                      data = train_data,
+                      family = "poisson",
+                      alpha = 1,  # L1 regularization (Lasso)
+                      lambda = best_lambda)
+
+#Cross-validation
+
+model <- train(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, method = "lm")
+ctrl <- trainControl(method = "cv", number = 5)
+cv_results <- train(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data, method = "glm", trControl = ctrl)
+summary(cv_results)
+print(model)
+
+#correct cross validation starts here
+train_control <- trainControl(method = "cv", number = 5)
+
+# training the model by assigning sales column
+# as target variable and rest other column
+# as independent variable
+model1 <- train(EC ~ Surface_Hydrophobicity + Zeta_Potential+U, data = train_data,
+                method = "knn",
+                trControl = train_control)
+
+# printing model performance metrics
+# along with other details
+print(model1)
+
+
+# Set the number of folds for cross-validation
+k <- 5
+
+# Create an empty vector to store the cross-validated predictions
+cv_predictions <- vector("list", length = k)
+
+# Perform cross-validation
+for (i in 1:k) {
+  # Split the data into training and validation sets for each fold
+  train_indices <- which((1:nrow(train_data)) %% k != i %% k)
+  validation_indices <- which((1:nrow(train_data)) %% k == i %% k)
+  train_fold <- train_data[train_indices, ]
+  validation_fold <- train_data[validation_indices, ]
+  
+  # Train the Gaussian kernel SVR model on the training fold
+  model_gaussiancv <- ksvm(EC ~ Surface_Hydrophobicity + Zeta_Potential + U, data = train_fold, type = "eps-svr", kernel = "rbfdot")
+  
+  # Make predictions on the validation fold
+  predictions <- predict(model_gaussiancv, newdata = validation_fold)
+  
+  # Store the predictions in the cv_predictions vector
+  cv_predictions[[i]] <- predictions
+}
+
+# Combine the cross-validated predictions into a single vector
+cv_predictions <- unlist(cv_predictions)
+
+# Calculate the RMSECV
+rmsecv <- sqrt(mean((train_data$EC - cv_predictions)^2)) 
+
+
+Gelation pred
+# Load necessary libraries
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(kernlab)
+library(nnet)
+library(neuralnet)
+library(class)
+library(readxl)
+library(splines)
+library(rpart)
+library(gbm)
+library(lightgbm)
+library(xgboost)
+library(glmnet)
+library(lars)
+# Read in data
+protein_data <- read_xlsx("dataset path.xlsx")
+
+# Split data into training and testing sets
+set.seed(123)
+train_idx <- createDataPartition(protein_data$`Gel Strength`, p = 0.7, list = FALSE)
+train_data <- protein_data[train_idx, ]
+test_data <- protein_data[-train_idx, ]
+
+# Create regression models
+lm_model <- lm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data)
+poly_model <- lm(`Gel Strength` ~ poly(Solubility_7NH, degree = 2)+ poly(WHC, degree = 2)+ poly(Beta, degree = 2)+ poly(U, degree = 2)+ poly(Polymerized_Protein, degree = 2), data = train_data)
+rf_model <- randomForest(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, mtry=4)
+svm_model <- ksvm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, type = "eps-svr", kernel = "vanilladot")
+svm_model <- ksvm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, type = "eps-svr", kernel = "rbfdot",
+                  C = 0.1, kpar = list(sigma = 0.01))
+gaussian_model <- ksvm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, kernel = "rbfdot", type = "eps-svr",
+                       C = 10, kpar = list(sigma = 1))
+nn_model <- nnet(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, size =20)
+spline_model <- lm(`Gel Strength` ~ ns(Solubility_7NH, df = 4)+ ns(WHC, df = 3)+ ns(Beta, df = 5)+ ns(U, df = 3)+ ns(Polymerized_Protein, df = 3), data = train_data)
+knn_model <- knn(train = train_data[, c("Solubility_7NH", "WHC", "Beta","U", "Polymerized_Protein")], 
+                 test = test_data[, c("Solubility_7NH", "WHC","Beta", "U", "Polymerized_Protein")], 
+                 cl = train_data$EC, 
+                 k = 1)
+tree_model <- rpart(`Gel Strength` ~ Solubility_7NH + WHC + Beta+ U+Polymerized_Protein, data = train_data)
+tree_model <- rpart(`Gel Strength` ~ Solubility_7NH + WHC + Beta+ U+Polymerized_Protein, data = train_data, method = "anova", 
+                    control = rpart.control(maxdepth = 6, 
+                                            minsplit = 2, 
+                                            minbucket = 1, 
+                                            cp = 0.001))
+gbm_model <- gbm(`Gel Strength` ~ Solubility_7NH + WHC + Beta+ U+Polymerized_Protein, data = train_data, n.trees = 100, interaction.depth = 3)
+gbm_model <- train(
+  `Gel Strength` ~ Solubility_7NH + WHC + Beta+ U+Polymerized_Protein,
+  data = train_data,
+  method = "gbm",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = data.frame(n.trees = 100,
+                        interaction.depth = 7,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 5)
+)
+poisson_model <- glm(`Gel Strength` ~ Solubility_7NH +WHC +Beta+ U+Polymerized_Protein, data = train_data, family = poisson())
+lasso_model <- glmnet( x= as.matrix(train_data[, c("Solubility_7NH", "WHC","Beta", "U", "Polymerized_Protein")]), y = train_data$`Gel Strength`, alpha = 1, lambda = 1)
+loglinear_model <- glm(`Gel Strength` ~ Solubility_7NH + WHC +Beta+ U+Polymerized_Protein, data = train_data, family = poisson(link = "log"))
+
+
+# Make predictions using test set
+lm_pred <- predict(lm_model, newdata = test_data)
+poly_pred <- predict(poly_model, newdata = test_data)
+rf_pred <- predict(rf_model, newdata = test_data)
+svm_pred <- predict(svm_model, newdata = test_data)
+gaussian_pred <- predict(gaussian_model, newdata = test_data)
+nn_pred <- predict(nn_model, newdata = test_data)
+sp_pred <- predict(spline_model, newdata = test_data)
+knn_pred <- as.numeric(knn_model)
+tree_pred <- predict(tree_model, newdata = test_data)
+poisson_pred <- predict(poisson_model, newdata = test_data)
+gbm_pred <- predict(gbm_model, newdata = test_data)
+lasso_pred <- predict(lasso_model, newx = as.matrix(test_data[, c("Solubility_7NH", "WHC", "Beta","U", "Polymerized_Protein")]))
+loglinear_pred <- predict(loglinear_model, newdata = test_data, type = "response")
+
+# Create a data frame to store the predictions
+predictions <- data.frame(lm = lm_pred, poly = poly_pred, rf = rf_pred, svm = svm_pred, gaussian = gaussian_pred, nn = nn_pred, sp = sp_pred, tree = tree_pred, gbm = gbm_pred, poisson = poisson_pred, lasso = lasso_pred, loglin = loglinear_pred, actual = test_data$`Gel Strength`)
+
+# Melt the data frame for plotting
+library(reshape2)
+predictions_melted <- melt(predictions, id.vars = "actual", variable.name = "model", value.name = "predicted")
+
+# Predict on test data
+test_data$Linear_Prediction <- predict(lm_model, newdata = test_data)
+test_data$Poly_Prediction <- predict(poly_model, newdata = test_data)
+test_data$RF_Prediction <- predict(rf_model, newdata = test_data)
+test_data$SVM_Prediction <- predict(svm_model, newdata = test_data)
+test_data$Gaussian_Prediction <- predict(gaussian_model, newdata = test_data)
+test_data$nn_Prediction <- predict(nn_model, newdata = test_data)
+test_data$Spline_Prediction <- predict(spline_model, newdata = test_data)
+test_data$KNN_Prediction <- as.numeric(knn_model)
+test_data$Tree_Prediction <- predict(tree_model, newdata = test_data)
+test_data$Poisson_Prediction <- predict(poisson_model, newdata = test_data)
+test_data$Gbm_Prediction <- predict(gbm_model, newdata = test_data)
+test_data$Lasso_Prediction <- predict(lasso_model, newx = as.matrix(test_data[, c("Solubility_7NH", "WHC","Beta", "U", "Polymerized_Protein")]))
+test_data$Loglinear_Prediction <- predict(loglinear_model, newdata = test_data, type = "response")
+
+write.xlsx(test_data, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_gel1.xlsx", rowNames = TRUE)
+
+
+
+# Calculate MAE and R2 for each model
+
+library(Metrics)
+mae_linear <- mae(test_data$`Gel Strength`, test_data$Linear_Prediction)
+mae_poly <- mae(test_data$`Gel Strength`, test_data$Poly_Prediction)
+mae_rf <- mae(test_data$`Gel Strength`, test_data$RF_Prediction)
+mae_svm <- mae(test_data$`Gel Strength`, test_data$SVM_Prediction)
+mae_gaussian <- mae(test_data$`Gel Strength`, test_data$Gaussian_Prediction)
+mae_nn <- mae(test_data$`Gel Strength`, test_data$nn_Prediction)
+mae_sp <- mae(test_data$`Gel Strength`, test_data$Spline_Prediction)
+mae_knn <- mae(test_data$`Gel Strength`, test_data$KNN_Prediction)
+mae_tree <- mae(test_data$`Gel Strength`, test_data$Tree_Prediction)
+mae_poisson <- mae(test_data$`Gel Strength`, test_data$Poisson_Prediction)
+mae_gbm <- mae(test_data$`Gel Strength`, test_data$Gbm_Prediction)
+mae_lasso <- mae(test_data$`Gel Strength`, test_data$Lasso_Prediction)
+mae_loglinear <- mae(test_data$`Gel Strength`, test_data$Loglinear_Prediction)
+
+
+corr <- cor(test_data$`Gel Strength`, test_data$Linear_Prediction)
+r2_linear <- corr^2
+corr2 <- cor(test_data$`Gel Strength`, test_data$Poly_Prediction)
+r2_poly <- corr2^2
+corr3 <- cor(test_data$`Gel Strength`, test_data$RF_Prediction)
+r2_rf <- corr3^2
+corr4 <- cor(test_data$`Gel Strength`, test_data$SVM_Prediction)
+r2_svm <- corr4^2
+corr5 <- cor(test_data$`Gel Strength`, test_data$Gaussian_Prediction)
+r2_gaussian <- corr5^2
+corr6 <- cor(test_data$`Gel Strength`, test_data$nn_Prediction)
+r2_nn <- corr6^2
+corr7 <- cor(test_data$`Gel Strength`, test_data$Spline_Prediction)
+r2_sp <- corr7^2
+corr8 <- cor(test_data$`Gel Strength`, test_data$KNN_Prediction)
+r2_knn <- corr8^2
+corr9 <- cor(test_data$`Gel Strength`, test_data$Tree_Prediction)
+r2_tree <- corr9^2
+corr10 <- cor(test_data$`Gel Strength`, test_data$Poisson_Prediction)
+r2_poisson <- corr10^2
+corr11 <- cor(test_data$`Gel Strength`, test_data$Gbm_Prediction)
+r2_gbm <- corr11^2
+corr12 <- cor(test_data$`Gel Strength`, test_data$Lasso_Prediction)
+r2_lasso <- corr12^2
+corr13 <- cor(test_data$`Gel Strength`, test_data$Loglinear_Prediction)
+r2_loglinear <- corr13^2
+
+lm_rmse <- rmse(test_data$`Gel Strength`, test_data$Linear_Prediction)
+poly_rmse <- rmse(test_data$`Gel Strength`, test_data$Poly_Prediction)
+rf_rmse <- rmse(test_data$`Gel Strength`, test_data$RF_Prediction)
+svm_rmse <- rmse(test_data$`Gel Strength`, test_data$SVM_Prediction)
+gaussian_rmse <- rmse(test_data$`Gel Strength`, test_data$Gaussian_Prediction)
+nn_rmse <- rmse(test_data$`Gel Strength`, test_data$nn_Prediction)
+sp_rmse <- rmse(test_data$`Gel Strength`, test_data$Spline_Prediction)
+knn_rmse <- rmse(test_data$`Gel Strength`, test_data$KNN_Prediction)
+tree_rmse <- rmse(test_data$`Gel Strength`, test_data$Tree_Prediction)
+poisson_rmse <- rmse(test_data$`Gel Strength`, test_data$Poisson_Prediction)
+gbm_rmse <- rmse(test_data$`Gel Strength`, test_data$Gbm_Prediction)
+lasso_rmse <- rmse(test_data$`Gel Strength`, test_data$Lasso_Prediction)
+loglinear_rmse <- rmse(test_data$`Gel Strength`, test_data$Loglinear_Prediction)
+
+# Create a data.frame to store the model results
+model_results_gel <- data.frame(Model = c("Linear", "Polynomial", "Random Forest", "SVM", "Gaussian", "NN", "Spline", "KNN", "Decision Tree", "Poisson", "GBM", "Lasso", "Loglinear"),
+                            MAE = c(mae_linear, mae_poly, mae_rf, mae_svm, mae_gaussian, mae_nn, mae_sp, mae_knn, mae_tree, mae_poisson, mae_gbm, mae_lasso, mae_loglinear),
+                            Correlationr = c(corr, corr2, corr3, corr4, corr5, corr6, corr7, corr8, corr9, corr10, corr11, corr12, corr13),
+                            R2 = c(r2_linear, r2_poly, r2_rf, r2_svm, r2_gaussian, r2_nn, r2_sp, r2_knn, r2_tree, r2_poisson, r2_gbm, r2_lasso, r2_loglinear),
+                            RMSE = c(lm_rmse, poly_rmse, rf_rmse, svm_rmse, gaussian_rmse, nn_rmse, sp_rmse, knn_rmse, tree_rmse, poisson_rmse, gbm_rmse, lasso_rmse, loglinear_rmse))
+
+write.xlsx(model_results_gel, file = "G:/FSCN/Ismail_Lab_PPIC/PPIC Staff Folders/Ronit/Projects/Microsoft/Manuscript figures/pred_gel_metrics.xlsx", rowNames = TRUE)
+
+
+p <- ggplot(test_data, aes(x = `Gel Strength`))+
+  geom_point(aes(y = Linear_Prediction, color = "Linear"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Linear_Prediction), method = "lm", se = FALSE, color = "DODGERBLUE", linewidth = 0.15, alpha = 0.25)+
+  geom_point(aes(y = Poly_Prediction, color = "Polynomial"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Poly_Prediction), method = "lm", se = FALSE, alpha = 0.25, color = "DARKORANGE2", linewidth = 0.15) +
+  geom_point(aes(y = RF_Prediction, color = "Random Forest"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = RF_Prediction), method = "lm", se = FALSE, color = "GREEN3", linewidth = 0.15, alpha = 0.25) +
+  geom_point(aes(y = SVM_Prediction, color = "SVR"), size = 1.5, alpha = 0.15)  +
+  geom_point(aes(y = Gaussian_Prediction, color = "Gaussian SVR"), size = 1.5, alpha = 0.75) +
+  geom_smooth(aes(y = Gaussian_Prediction), method = "lm", se = TRUE, alpha = 0.25, color = "red", linewidth = 0.7) +
+  geom_point(aes(y = nn_Prediction, color = "Neural Network"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Spline_Prediction, color = "Spline"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Spline_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "peachpuff2", linewidth = 0.15)+
+  geom_point(aes(y = KNN_Prediction, color = "k-NN"), size = 1.5, alpha = 0.15) +
+  geom_point(aes(y = Tree_Prediction, color = "Decision Tree"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Tree_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "blue3", linewidth = 0.15)+
+  geom_point(aes(y = Poisson_Prediction, color = "Poisson"), size = 1.5, alpha = 0.15)+
+  geom_point(aes(y = Gbm_Prediction, color = "GBM"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Gbm_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "darkgoldenrod3", linewidth = 0.15)+
+  geom_point(aes(y = Lasso_Prediction, color = "Lasso"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Lasso_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "brown", linewidth = 0.15)+
+  geom_point(aes(y = Loglinear_Prediction, color = "Loglinear"), size = 1.5, alpha = 0.15) +
+  geom_smooth(aes(y = Loglinear_Prediction), method = "lm", se = FALSE, alpha = 0.2, color = "magenta", linewidth = 0.15)+
+  scale_color_manual(values = c("Linear" = "DODGERblue", "Polynomial" = "DARKORANGE2", "Random Forest" = "green3", "SVR" = "PURPLE", "Gaussian SVR" = "red", "Neural Network" = "GREY", "Spline" = "peachpuff2", "k-NN" = "cyan4", "Decision Tree" = "blue3", "Poisson" = "pink1", "GBM" = "darkgoldenrod3", "Lasso" = "brown", "Loglinear" = "magenta")) +
+  ggtitle("Gel Strength Prediction by Regression Models")+
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Observed Gel Strength [N]", y = "Predicted Gel Strength [N]", color = "ML Models") +
+  theme_linedraw()+
+  annotate("text", x = 2.5, y = 35, hjust = 0, label = "Gaussian SVR Fit")+
+  annotate("text", x = 0, y = 33.65, hjust = 0, label = "R² = 0.8822; MAE = 3.054; RMSE = 6.385; RMSEcv = 3.871", size = 3)+
+  annotate("segment", x = 0, xend = 2, y = 35, yend = 35, color = "red", size = 1) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14), panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ylim(0,35)
+  
+print(p)
+
+
+coef(lm_model)#Density plot for models
+# Create a data.frame to store the model results
+model_results1 <- data.frame(Models = c("Linear", "Polynomial", "Random Forest", "SVM", "Gaussian", "NN", "Spline"),
+                             Predicted_Gel_Strength = c(lm_pred, poly_pred, rf_pred, svm_pred, gaussian_pred, nn_pred, sp_pred))
+
+# Create a density plot for each model
+ggplot(model_results1, aes(x = Predicted_Gel_Strength, fill = Models)) +
+  geom_density(alpha = 0.2) +
+  scale_fill_manual(values = c("red", "pink", "blue", "green", "purple", "orange", "grey")) +
+  labs(x = "Predicted Gel Strength [N]", y = "Density") +
+  ggtitle("Density Plots of Predicted Gel Strength by Model")+theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14), axis.text = element_text(size =12))
+
+# create a boxplot of the predicted Gel values for each model
+ggplot(model_results1, aes(x = Models, y = Predicted_Gel_Strength)) +
+  geom_boxplot() +
+  labs(x = "Model", y = "Predicted Gel Strength [N]") +
+  ggtitle("Comparison of Predicted Gel Strength Across Models")+theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        legend.title = element_text(face = "bold", size = 14), axis.text = element_text(size =12))
+
+
+#Hyperparameter tuning
+poly_model <- lm(`Gel Strength` ~ poly(Solubility_7NH, degree = 3)+ poly(WHC, degree = 3)+ poly(Beta, degree = 3)+ poly(U, degree = 3)+ poly(Polymerized_Protein, degree = 3), data = train_data)
+rf_model <- randomForest(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data)
+#POlynomial
+library(caret)
+
+# Define the degrees of the polynomial to evaluate
+degree_grid <- c(1, 2, 3, 4)  # Example grid of degrees to try
+
+# Create a data frame to store the results
+results <- data.frame(degree = integer(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform cross-validation to evaluate different degrees
+for (degree in degree_grid) {
+  # Fit the polynomial regression model with the current degree
+  formula <- as.formula(paste("`Gel Strength` ~ poly(Solubility_7NH, degree = ", degree, ") + poly(WHC, degree = ", degree, ") + poly(Beta, degree = ", degree, ") + poly(U, degree = ", degree, ")+ poly(Polymerized_Protein, degree = ", degree, ")", sep = ""))
+  poly_model <- lm(formula, data = train_data)
+  
+  # Make predictions on the test set
+  pred <- predict(poly_model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((test_data$`Gel Strength`- pred)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(degree = degree, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#RF
+library(caret)
+library(randomForest)
+
+# Define the grid of hyperparameters to search
+rf_grid <- expand.grid(
+  mtry = c(2, 4, 6),  # Number of variables randomly sampled as candidates at each split
+  ntree = c(100, 200, 300)  # Number of trees in the forest
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+rf_tuned <- tuneRF(
+  x = train_data[, c("Solubility_7NH", "WHC", "Beta", "U", "Polymerized_Protein")],
+  y = train_data$`Gel Strength`,
+  mtryStart = 2,  # Start value for mtry
+  mtryEnd = 6,    # End value for mtry
+  stepFactor = 2, # Factor to increase mtry at each iteration
+  ntreeTry = 100, # Number of trees to try for each mtry
+  improve = 0.05  # Minimum improvement in node impurity for splitting
+)
+
+# Print the tuned parameters
+print(rf_tuned)
+
+# Access the hyperparameters of the random forest model
+mtry_value <- rf_model$mtry
+ntree_value <- rf_model$ntree
+
+# Print the hyperparameter values
+cat("mtry =", mtry_value, "\n")
+cat("ntree =", ntree_value, "\n")
+
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  hidden_units = list(c(5), c(10), c(7, 5)),  # Example hyperparameter: hidden units
+  decay = c(0.01, 0.001, 0.0001)  # Example hyperparameter: weight decay
+)
+
+# Function to train and evaluate the model with given hyperparameters
+train_and_evaluate <- function(hidden_units, decay) {
+  # Train the model with current hyperparameter settings
+  model <- neuralnet(
+    `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data,
+    hidden = hidden_units
+  )
+  
+  # Make predictions on the test set
+  predictions <- compute(model, test_data[, c("Solubility_7NH", "WHC", "Beta", "U", "Polymerized_Protein")])$net.result
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Return hyperparameter settings and RMSE
+  list(hidden_units = hidden_units, decay = decay, RMSE = rmse)
+}
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  train_and_evaluate(row$hidden_units, row$decay)
+})
+
+# Combine the results into a data frame
+results <- do.call(rbind, results)
+
+# Print the results
+print(results)
+
+#svm
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  cost = c(0.1, 1, 10),  # Example hyperparameter: cost
+  gamma = c(0.01, 0.1, 1)  # Example hyperparameter: gamma
+)
+
+# Create an empty data frame to store the results
+results <- data.frame(cost = numeric(), gamma = numeric(), RMSE = numeric(), stringsAsFactors = FALSE)
+
+# Perform grid search with cross-validation
+for (i in 1:nrow(hyperparameters)) {
+  cost <- hyperparameters$cost[i]
+  gamma <- hyperparameters$gamma[i]
+  
+  # Train the model with current hyperparameter settings
+  model <- ksvm(
+    `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "vanilladot",
+    C = cost,
+    kpar = list()
+  )
+  
+  # Make predictions on the test set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results[i, ] <- c(cost, gamma, rmse)
+}
+
+# Print the results
+print(results)
+
+#GBM
+# Define the grid of hyperparameters to search
+gbm_grid <- expand.grid(
+  n.trees = c(50, 100, 200),  # Number of trees in the boosting process
+  interaction.depth = c(3, 5, 7),  # Depth of variable interactions
+  shrinkage = c(0.1, 0.01),  # Learning rate or shrinkage parameter
+  n.minobsinnode = c(5, 10)  # Minimum number of observations in a terminal node
+)
+
+
+# Perform cross-validation to find the optimal hyperparameters
+gbm_tuned <- train(
+  `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,
+  data = train_data,
+  method = "gbm",
+  tuneGrid = gbm_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Access the best hyperparameters and model performance
+best_gbm_params <- gbm_tuned$bestTune
+best_gbm_model <- gbm_tuned$finalModel
+
+
+#Gaussian
+# Define the hyperparameter grid
+hyperparameters <- expand.grid(
+  C = c(0.1, 1, 10),  # Values for the Cost parameter
+  sigma = c(0.01, 0.1, 1)  # Values for the Kernel Width (sigma)
+)
+
+# Perform grid search with cross-validation
+results <- apply(hyperparameters, 1, function(row) {
+  C <- row$C
+  sigma <- row$sigma
+  
+  # Train the model with current hyperparameter settings
+  model <- ksvm(
+    `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,
+    data = train_data,
+    type = "eps-svr",
+    kernel = "rbfdot",
+    cost = C,
+    gamma = 1 / (2 * sigma^2)
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Return the hyperparameter settings and RMSE
+  c(C = C, sigma = sigma, RMSE = rmse)
+})
+
+# Convert the results to a data frame
+results <- as.data.frame(t(results))
+
+# Print the results
+print(results)
+
+#spline model
+# Load the required libraries
+# Define the tuning parameter grid
+spline_grid <- expand.grid(
+  df1 = c(2, 3, 4),  # Degree of freedom for Surface_Hydrophobicity
+  df2 = c(2, 3, 4),  # Degree of freedom for Zeta_Potential
+  intercept = c(TRUE, FALSE)  # Include or exclude intercept
+)
+
+# Perform cross-validation to find the optimal hyperparameters
+spline_tuned <- train(
+  `Gel Strength` ~ Beta+U+ ~ ns(Solubility_7NH, df = df1) + ns(WHC, df = df2) + U,
+  data = train_data,
+  method = "lm",  # Use lm method for spline model
+  tuneGrid = spline_grid,
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+# Define the grid of hyperparameters to search
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5) ,  # degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5),
+  df4 = c(3, 4, 5),
+  df5 = c(3, 4, 5)
+  # degrees of freedom for U
+)
+
+# Initialize variables to store the best hyperparameters and RMSE
+best_rmse <- Inf
+best_df1 <- NULL
+best_df2 <- NULL
+best_df3 <- NULL
+best_df4 <- NULL
+best_df5 <- NULL
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  df4 <- spline_grid$df4[i]
+  df5 <- spline_grid$df5[i]
+  
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(`Gel Strength` ~ ns(Solubility_7NH, df = df1) + ns(WHC, df = df2) + ns(Beta, df = df3)+ns(U, df = df4)+ ns(Polymerized_Protein, df = df5), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Check if current combination of hyperparameters is better than the previous best
+  if (rmse < best_rmse) {
+    best_rmse <- rmse
+    best_df1 <- df1
+    best_df2 <- df2
+    best_df3 <- df3
+    best_df4 <- df4
+    best_df5 <- df5
+  }
+}
+
+# Fit the final spline model using the best hyperparameters
+final_model <- lm(`Gel Strength` ~ ns(Solubility_7NH, df = best_df1) + ns(WHC, df = best_df2) + ns(Beta, df = best_df3)+ns(U, df = best_df4)+ ns(Polymerized_Protein, df = best_df5), data = train_data)
+
+# Evaluate the final model on the test set
+test_predictions <- predict(final_model, newdata = test_data)
+test_rmse <- sqrt(mean((test_predictions - test_data$`Gel Strength`)^2))
+
+spline_grid <- expand.grid(
+  df1 = c(3, 4, 5),  # degrees of freedom for Surface_Hydrophobicity
+  df2 = c(3, 4, 5),# degrees of freedom for Zeta_Potential
+  df3 = c(3, 4, 5),
+  df4 = c(3, 4, 5),
+  df5 = c(3, 4, 5)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(df1 = numeric(), df2 = numeric(), df3 = numeric(), df4 = numeric(), df5 = numeric(), RMSE = numeric())
+
+# Iterate over each combination of hyperparameters
+for (i in 1:nrow(spline_grid)) {
+  df1 <- spline_grid$df1[i]
+  df2 <- spline_grid$df2[i]
+  df3 <- spline_grid$df3[i]
+  df4 <- spline_grid$df4[i]
+  df5 <- spline_grid$df5[i]
+  # Fit the spline model with current hyperparameter settings
+  model <- lm(`Gel Strength` ~ ns(Solubility_7NH, df = df1) + ns(WHC, df = df2) + ns(Beta, df = df3)+ns(U, df = df4)+ ns(Polymerized_Protein, df = df5), data = train_data)
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Store the hyperparameter settings and RMSE in the results data frame
+  results <- rbind(results, data.frame(df1 = df1, df2 = df2, df3 = df3, df4 = df4, df5 = df5, RMSE = rmse))
+}
+
+# Print the results
+print(results)
+
+
+#Decision tree
+library(rpart)
+
+# Define the hyperparameters to search
+max_depths <- c(2, 4, 6)
+min_samples_splits <- c(2, 5, 10)
+min_samples_leafs <- c(1, 2, 4)
+cps <- c(0.001, 0.01, 0.1)
+
+# Initialize variables to store results
+best_rmse <- Inf
+best_tree <- NULL
+
+# Perform grid search
+for (max_depth in max_depths) {
+  for (min_samples_split in min_samples_splits) {
+    for (min_samples_leaf in min_samples_leafs) {
+      for (cp in cps) {
+        # Train the decision tree with current hyperparameters
+        model <- rpart(
+          `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,
+          data = train_data,
+          method = "anova",
+          control = rpart.control(maxdepth = max_depth, minsplit = min_samples_split, minbucket = min_samples_leaf, cp = cp)
+        )
+        
+        # Make predictions on the validation set
+        predictions <- predict(model, newdata = test_data)
+        
+        # Calculate RMSE
+        rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)))
+        
+        # Check if current model has lower RMSE
+        if (rmse < best_rmse) {
+          best_rmse <- rmse
+          best_tree <- model
+        }
+      }
+    }
+  }
+}
+
+# Print the best model
+print(best_tree)
+
+hyperparameters <- expand.grid(
+  max_depth = c(2, 4, 6),
+  min_samples_split = c(2, 5, 10),
+  min_samples_leaf = c(1, 2, 4),
+  cp = c(0.001, 0.01, 0.1)
+)
+
+# Initialize an empty data frame to store the results
+results <- data.frame(hyperparameters = character(),
+                      rmse = numeric(),
+                      stringsAsFactors = FALSE)
+
+# Perform grid search
+for (i in 1:nrow(hyperparameters)) {
+  # Get the current set of hyperparameters
+  params <- hyperparameters[i, ]
+  
+  # Train the decision tree model using the current hyperparameters
+  model <- rpart(
+    `Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,
+    data = train_data,
+    method = "anova",
+    control = rpart.control(
+      maxdepth = params$max_depth,
+      minsplit = params$min_samples_split,
+      minbucket = params$min_samples_leaf,
+      cp = params$cp
+    )
+  )
+  
+  # Make predictions on the validation set
+  predictions <- predict(model, newdata = test_data)
+  
+  # Calculate RMSE
+  rmse <- sqrt(mean((predictions - test_data$`Gel Strength`)^2))
+  
+  # Store the results
+  results <- rbind(results, data.frame(hyperparameters = toString(params),
+                                       rmse = rmse))
+}
+
+# Print the results
+print(results)
+
+#K-NN model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of k
+grid <- expand.grid(k = 1:10)
+
+# Train the KNN model using cross-validation and grid search
+knn_model <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, method = "knn",
+                   trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(knn_model$bestTune)
+print(knn_model$results)
+
+
+#Poisson model
+# Define the training control for cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Define the search grid for different values of the regularization parameter
+grid <- expand.grid(alpha = seq(0, 1, by = 0.1), lambda = seq(0, 1, by = 0.1))
+
+# Train the Poisson regression model using cross-validation and grid search
+poisson_model <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, method = "glmnet",
+                       family = "poisson", trControl = ctrl, tuneGrid = grid)
+
+# Print the best hyperparameters and corresponding performance
+print(poisson_model$bestTune)
+print(poisson_model$results)
+
+#Loglinear model
+# Load required libraries
+library(glmnet)
+library(caret)
+
+# Define the tuning grid
+grid <- expand.grid(lambda = seq(0, 1, by = 0.1), alpha =  seq(0, 1, by = 0.1))  # Regularization parameter values
+
+# Define cross-validation control
+ctrl <- trainControl(method = "cv", number = 5, verboseIter = TRUE)
+
+# Train the log-linear model using cross-validation and grid search
+loglinear_model <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein,  # Replace with your formula and predictors
+                         data = train_data,
+                         method = "glmnet",
+                         family = "poisson",
+                         trControl = ctrl,
+                         tuneGrid = grid)
+
+# Print the best hyperparameter and corresponding RMSE
+best_lambda <- loglinear_model$bestTune$lambda
+best_rmse <- min(loglinear_model$results$RMSE)
+
+cat("Best Hyperparameter:\n")
+cat("Lambda:", best_lambda, "\n")
+cat("Best RMSE:", best_rmse, "\n")
+
+# Fit the final log-linear model with the best hyperparameter
+final_model <- glmnet(Solubility_7NH ~ .,  # Replace with your formula and predictors
+                      data = train_data,
+                      family = "poisson",
+                      alpha = 1,  # L1 regularization (Lasso)
+                      lambda = best_lambda)
+
+#Cross-validation
+library(boot)
+model <-lm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data)
+
+formula <- `Gel Strength` ~ Solubility_7NH + WHC + Beta + U + Polymerized_Protein
+
+# Specify the number of folds for cross-validation
+k <- 5
+
+# Perform cross-validation using the cv.glm function
+cv_results <- cv.glm(data = train_data, glmfit = glm(formula, data = train_data), K = 5)
+
+# Access the cross-validation results
+summary(cv_results)
+
+library(pls)
+ncomp <- 10  # Specify the number of components
+model <- plsr(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, ncomp = 5, validation = "CV")
+validationplot(model, val.type = "MSEP")
+rmsecv <- MSEP(model)
+rmsecv
+
+model <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, method = "lm")
+ctrl <- trainControl(method = "cv", number = 5)
+cv_results <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data, method = "glm", trControl = ctrl)
+summary(cv_results)
+print(model)
+
+#correct cross validation starts here
+train_control <- trainControl(method = "cv", number = 5)
+
+# training the model by assigning sales column
+# as target variable and rest other column
+# as independent variable
+model <- train(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_data,
+               method = "knn",
+               trControl = train_control)
+
+# printing model performance metrics
+# along with other details
+print(model)
+
+# Set the number of folds for cross-validation
+k <- 5
+
+# Create an empty vector to store the cross-validated predictions
+cv_predictions <- vector("list", length = k)
+
+# Perform cross-validation
+for (i in 1:k) {
+  # Split the data into training and validation sets for each fold
+  train_indices <- which((1:nrow(train_data)) %% k != i %% k)
+  validation_indices <- which((1:nrow(train_data)) %% k == i %% k)
+  train_fold <- train_data[train_indices, ]
+  validation_fold <- train_data[validation_indices, ]
+  
+  # Train the Gaussian kernel SVR model on the training fold
+  model_gaussiancv <- ksvm(`Gel Strength` ~ Solubility_7NH+WHC+Beta+U+Polymerized_Protein, data = train_fold, type = "eps-svr", kernel = "rbfdot")
+  
+  # Make predictions on the validation fold
+  predictions <- predict(model_gaussiancv, newdata = validation_fold)
+  
+  # Store the predictions in the cv_predictions vector
+  cv_predictions[[i]] <- predictions
+}
+
+# Combine the cross-validated predictions into a single vector
+cv_predictions <- unlist(cv_predictions)
+
+# Calculate the RMSECV
+rmsecv <- sqrt(mean((train_data$`Gel Strength` - cv_predictions)^2)) 
